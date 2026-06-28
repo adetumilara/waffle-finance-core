@@ -60,8 +60,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "build:analyze": "tsc && npm run analyze",
+    "build": "node init && tsc",
+    "build:analyze": "node init && tsc && npm run analyze",
     "analyze": "node scripts/analyze-bundle.js",
     "test": "vitest run",
     "test:watch": "vitest",
