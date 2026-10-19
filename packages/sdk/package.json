@@ -105,8 +105,8 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
-    "build:analyze": "tsc && npm run analyze",
+    "build": "node init && tsc",
+    "build:analyze": "node init && tsc && npm run analyze",
     "analyze": "node scripts/analyze-bundle.js",
     "analyze:cost": "node scripts/measure-entry-cost.mjs",
     "analyze:cost:bundle": "node scripts/measure-entry-cost.mjs --bundle",
