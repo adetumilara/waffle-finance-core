@@ -61,12 +61,22 @@ function servicePayload(startedAt: number) {
  * detail now names the actual defect: the old code reported
  * `missing_htlc_escrow` even when the escrow was present and the *key* was the
  * missing piece.
+ *
+ * A chain is considered "intentionally absent" (not a readiness failure) when
+ * no signing credentials are configured for it.  A chain with credentials but
+ * a missing contract address is a misconfiguration and blocks readiness.
  */
 function readinessChecks(deps: ResolverHealthDeps, policy: SupportPolicy) {
-  const { supervisor } = deps;
+  const { supervisor, cfg } = deps;
 
   const ethClaim = supportsAction(policy, "ethereum", "claim");
   const sorobanClaim = supportsAction(policy, "stellar", "claim");
+
+  // Determine whether each chain was intentionally configured (has a signing
+  // key/secret).  A chain with credentials but a missing contract is a
+  // misconfiguration.  A chain with no credentials at all was never enabled.
+  const ethIntentional = Boolean(cfg.ethereum.resolverPrivateKey);
+  const sorobanIntentional = Boolean(cfg.soroban.resolverSecret);
 
   // "supervisor" check: ok when it is actively running or idle (not yet
   // started).  Not-ok when it has stopped due to exhausted restarts or a fatal
@@ -105,20 +115,12 @@ function readinessChecks(deps: ResolverHealthDeps, policy: SupportPolicy) {
     },
   ];
 
-  // Registry status: not-ready when this resolver's own on-chain standing on
-  // any tracked chain is low_stake / slashed / unbonding / inactive. A chain
-  // that has never been probed (registry not configured for it) reports
-  // ok=true — see ResolverStatusMonitor.isReady().
-  if (registryStatus) {
-    const ready = registryStatus.isReady();
-    checks.push({
-      name: "registry_status",
-      ok: ready,
-      detail: ready ? "active" : "degraded",
-    });
-  }
+  // Registry status: reserved for future use when a ResolverStatusMonitor is
+  // threaded through ResolverHealthDeps.  Not-ready when the resolver's own
+  // on-chain standing is low_stake / slashed / unbonding / inactive.
+  // Currently omitted — no registry probe is wired up in this deployment.
 
-  return checks;
+  return { checks, ethIntentional, sorobanIntentional };
 }
 
 // ── Server factory ────────────────────────────────────────────────────────────
@@ -168,14 +170,25 @@ export function createResolverHealthServer(deps: ResolverHealthDeps): Server {
     // A supervisor in "stopping" state returns 503 so new traffic is not
     // routed to a pod that is mid-teardown.
     if (req.url === "/readyz") {
-      const checks = readinessChecks(deps, policy);
+      const { checks, ethIntentional, sorobanIntentional } = readinessChecks(deps, policy);
       const state = deps.supervisor.state;
 
       // Pods that are cleanly stopping should not receive new traffic.
       const isStoppingOrStopped =
         state === "stopping" || state === "stopped" || state === "failed";
 
-      const allChecksOk = checks.every((c) => c.ok);
+      // The resolver is ready when all checks pass and the supervisor is
+      // not shutting down.  A chain that was never intentionally configured
+      // (no signing credential) is not a blocking failure — it's expected
+      // to be absent in single-chain deployments.
+      const allChecksOk = checks.every((c) => {
+        if (!c.ok) {
+          // Chain checks: only block when the chain was intentionally configured.
+          if (c.name === "ethereum_config") return !ethIntentional;
+          if (c.name === "soroban_config") return !sorobanIntentional;
+        }
+        return c.ok;
+      });
       const ok = allChecksOk && !isStoppingOrStopped;
 
       json(res, ok ? 200 : 503, {
@@ -191,9 +204,9 @@ export function createResolverHealthServer(deps: ResolverHealthDeps): Server {
     // Full health payload for dashboards and debugging.  Not used by
     // Kubernetes probes directly (too verbose for high-frequency polling).
     if (req.url === "/health") {
-      const checks = readinessChecks(deps, policy);
+      const { checks } = readinessChecks(deps, policy);
       const lifecycleState = deps.lifecycle?.state;
-      const supervisorState = supervisor.state;
+      const supervisorState = deps.supervisor.state;
       const effectiveState = lifecycleState ?? supervisorState;
       const dependencyFailures = checks.filter((c) => !c.ok);
 
