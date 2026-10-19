@@ -68,6 +68,8 @@ export interface ChainState {
   maxHeight: number | bigint;
   /** Per-order order ID sequence (monotonically increasing). */
   orderIdSequence: Map<bigint, bigint>;
+  /** Global maximum orderId seen on this chain so far. Used to detect regressions across orders. */
+  maxOrderId: bigint;
   /** Last timestamp observed per order. */
   lastTimestamp: Map<bigint, number>;
 }
@@ -127,14 +129,15 @@ export class EventOrderGuard {
   }
 
   /**
-   * Get or create the ChainState for a chain.
+   * Get or create the ChainState for a chain (internal, always returns a state).
    */
-  private getChainState(chain: Chain): ChainState {
+  private getOrCreateChainState(chain: Chain): ChainState {
     if (!this.chainStates.has(chain)) {
       this.chainStates.set(chain, {
         chain,
         maxHeight: 0n,
         orderIdSequence: new Map<bigint, bigint>(),
+        maxOrderId: 0n,
         lastTimestamp: new Map<bigint, number>(),
       });
     }
@@ -148,7 +151,7 @@ export class EventOrderGuard {
    * Updates the maxHeight watermark for all subsequent validation.
    */
   updateChainHead(chain: Chain, newHeight: number | bigint): void {
-    const state = this.getChainState(chain);
+    const state = this.getOrCreateChainState(chain);
     const newHeightBig = BigInt(newHeight);
     if (newHeightBig > state.maxHeight) {
       state.maxHeight = newHeightBig;
@@ -162,7 +165,7 @@ export class EventOrderGuard {
    * Throws OrderingError or StalenessError if validation fails.
    */
   validateEvent(metadata: EventMetadata): EventRecord {
-    const state = this.getChainState(metadata.chain);
+    const state = this.getOrCreateChainState(metadata.chain);
     const blockBig = BigInt(metadata.blockNumber);
 
     // ── Staleness check ────────────────────────────────────────────────────
@@ -178,20 +181,27 @@ export class EventOrderGuard {
       };
     }
 
-    // ── Ordering check by event type ───────────────────────────────────────
-    const eventOrder = this.getExpectedEventOrder(metadata.eventType);
+    // ── Ordering check ─────────────────────────────────────────────────────
+    // Two distinct regression cases:
+    //   1. This orderId has been seen before and its stored value regressed.
+    //   2. This orderId is lower than the global max seen on this chain —
+    //      i.e. a later-arriving event for an older order after a higher
+    //      order has already been processed (cross-order regression).
     const lastOrderId = state.orderIdSequence.get(metadata.orderId) ?? 0n;
-    const expectedOrderId = lastOrderId + 1n;
 
-    if (metadata.orderId < lastOrderId) {
-      // Order ID regressed - possible fork or replay
+    const crossOrderRegression =
+      metadata.orderId < state.maxOrderId &&
+      !state.orderIdSequence.has(metadata.orderId);
+
+    if (metadata.orderId < lastOrderId || crossOrderRegression) {
+      const from = crossOrderRegression ? state.maxOrderId : lastOrderId;
       const error = new OrderingError(
         metadata.chain,
         metadata.orderId,
         metadata.eventType,
-        `order ID regressed from ${lastOrderId} to ${metadata.orderId} - possible fork or replay attack`,
+        `order ID regressed from ${from} to ${metadata.orderId} - possible fork or replay attack`,
         blockBig,
-        lastOrderId,
+        from,
       );
       return {
         metadata,
@@ -204,9 +214,10 @@ export class EventOrderGuard {
     }
 
     // ── Event type sequence validation ─────────────────────────────────────
-    // For now, we just ensure order IDs are monotonically increasing
-    // More complex validation can be added based on business logic
     state.orderIdSequence.set(metadata.orderId, metadata.orderId);
+    if (metadata.orderId > state.maxOrderId) {
+      state.maxOrderId = metadata.orderId;
+    }
 
     // ── Timestamp validation (if provided) ────────────────────────────────
     if (metadata.timestamp !== undefined) {
@@ -323,13 +334,21 @@ export class EventOrderGuard {
  */
 export class EventOrderMonitor {
   private readonly orderGuard: EventOrderGuard;
-  private readonly validCount = 0;
-  private readonly invalidCount = 0;
-  private readonly rejectedCount = 0;
-  private readonly staleCount = 0;
+  private validCount = 0;
+  private invalidCount = 0;
+  private rejectedCount = 0;
+  private staleCount = 0;
 
   constructor(opts?: { maxBlockAge?: number; orderBufferMs?: number }) {
     this.orderGuard = new EventOrderGuard(opts);
+  }
+
+  /**
+   * Update the chain head watermark (delegates to the inner guard).
+   * Call this before processing events from a new poll tick.
+   */
+  updateChainHead(chain: Chain, newHeight: number | bigint): void {
+    this.orderGuard.updateChainHead(chain, newHeight);
   }
 
   /**
@@ -437,20 +456,20 @@ export class EventMetadataBuilder {
  * Builder for EventOrderGuard configuration.
  */
 export class EventOrderGuardConfigBuilder {
-  private maxBlockAge = 100;
-  private orderBufferMs = 30_000;
+  private _maxBlockAge = 100;
+  private _orderBufferMs = 30_000;
 
   maxBlockAge(value: number): this {
-    this.maxBlockAge = value;
+    this._maxBlockAge = value;
     return this;
   }
 
   orderBufferMs(value: number): this {
-    this.orderBufferMs = value;
+    this._orderBufferMs = value;
     return this;
   }
 
   build(): EventOrderGuard {
-    return new EventOrderGuard({ maxBlockAge: this.maxBlockAge, orderBufferMs: this.orderBufferMs });
+    return new EventOrderGuard({ maxBlockAge: this._maxBlockAge, orderBufferMs: this._orderBufferMs });
   }
 }
