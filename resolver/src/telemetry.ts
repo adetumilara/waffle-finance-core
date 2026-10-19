@@ -131,6 +131,13 @@ export interface ComputeTelemetryInput {
   commandQueueDepth: number;
   /** recentFailureCount at or above this trips "degraded". Default: 3. */
   degradedFailureThreshold: number;
+  /**
+   * Consecutive RPC errors at or above this trips "degraded". Default: 3.
+   * Set to 0 to disable this check.
+   */
+  consecutiveRpcErrors?: number;
+  /** consecutiveRpcErrors at or above this trips "degraded". Default: 3. */
+  consecutiveRpcErrorThreshold?: number;
   // Extended inputs for issue #769 per-chain health
   chainHealthData?: Array<{
     chain: string;
@@ -199,6 +206,9 @@ export function computeResolverTelemetry(input: ComputeTelemetryInput): Resolver
     degradedFailureThreshold,
     chainHealthData = [],
   } = input;
+
+  const consecutiveRpcErrors = input.consecutiveRpcErrors ?? 0;
+  const consecutiveRpcErrorThreshold = input.consecutiveRpcErrorThreshold ?? 3;
 
   // Build a lookup map for the extended health data.
   const healthMap = new Map(chainHealthData.map((d) => [d.chain, d]));
