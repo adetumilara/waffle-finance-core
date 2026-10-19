@@ -1,5 +1,9 @@
 # Multi-Package Release Checklist
 
+For relayer chain integration changes, use the
+[network-to-ABI reference](../relayer/NETWORK_ABI_REFERENCE.md) and record coverage
+separately for testnet and mainnet, including any skipped fork checks.
+
 > **Owner:** Engineering team  
 > **Status:** Current  
 > **Related docs:**

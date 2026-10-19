@@ -1,7 +1,7 @@
 {
   "name": "wafflefinance",
   "version": "1.0.0",
-  "description": "WaffleFinance — non-custodial cross-chain atomic swap bridge: Ethereum · Stellar · Solana",
+  "description": "WaffleFinance \u2014 non-custodial cross-chain atomic swap bridge: Ethereum \u00b7 Stellar \u00b7 Solana",
   "type": "module",
   "private": true,
   "workspaces": [
@@ -15,9 +15,9 @@
   ],
   "packageManager": "pnpm@8.15.0",
   "scripts": {
-    "dev": "pnpm -r dev",
-    "build": "pnpm -r build",
-    "build:prod": "NODE_ENV=production pnpm -r build",
+    "dev": "node init && pnpm -r dev",
+    "build": "node init && pnpm -r build",
+    "build:prod": "node init && NODE_ENV=production pnpm -r build",
     "test": "pnpm -r test",
     "test:e2e": "pnpm --filter @wafflefinance/e2e test",
     "lint": "pnpm -r lint",
