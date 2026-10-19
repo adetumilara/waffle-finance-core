@@ -1,0 +1,21 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/927-930-relayer-recovery-logging-tests-docs",
+    "feature/bridge-reliability-improvements",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/927-930-relayer-recovery-logging-tests-docs": "main",
+    "feature/bridge-reliability-improvements": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/927-930-relayer-recovery-logging-tests-docs",
+    "feature/bridge-reliability-improvements",
+    "origin"
+  ]
+}
